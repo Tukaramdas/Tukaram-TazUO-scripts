@@ -5,8 +5,9 @@ import re
 # Graphic IDs for SOS scrolls / waterstained SOS
 SOS_GRAPHICS = [0x14ED, 0x14EE, 0x099F]
 
-# Matches coordinates like "(3107, 1480)" or "(4854, 1292)"
+# Matches coordinates with 1 to 4 digits: e.g. "(3107, 1480)" or "(363, 69)"
 COORD_REGEX = re.compile(r'\(\s*(\d{1,4})\s*,\s*(\d{1,4})\s*\)')
+FACET_REGEX = re.compile(r'(Trammel|Felucca)', re.IGNORECASE)
 
 SECTOR_KEYS = ["N_W", "N_MID", "N_E", "MID_W", "MID_MID", "MID_E", "S_W", "S_MID", "S_E"]
 
@@ -67,14 +68,14 @@ else:
     API.SysMsg("Loaded saved 9-pouch layout.", 68)
 
 # --- Step 2: Target the Raw / Unsorted SOS Container ---
-API.SysMsg("Target the container with your unsorted SOS...", 88)
+API.SysMsg("Target the container with your unsorted SOS bottles...", 88)
 source_bag = API.RequestTarget(timeout=10)
 if not source_bag or source_bag == 0:
     API.SysMsg("Cancelled.", 32)
     API.Stop()
 
-# --- Step 3: Sort All SOS ---
-API.SysMsg("Sorting...", 68)
+# --- Step 3: Sort All SOS & Add Map Markers ---
+API.SysMsg("Sorting and placing map markers...", 68)
 sorted_count = 0
 items = API.ItemsInContainer(source_bag)
 
@@ -83,7 +84,6 @@ for item in items:
         break
 
     if item.Graphic in SOS_GRAPHICS:
-        # Retry loop: wait up to 1.5s for the server to supply the tooltip props
         props_text = ""
         for _ in range(6):
             props_text = API.ItemNameAndProps(item.Serial)
@@ -95,16 +95,25 @@ for item in items:
         if match:
             x = int(match.group(1))
             y = int(match.group(2))
-            
+
+            # Move to corresponding regional pouch
             sector = get_sector_key(x, y)
             dest_pouch = pouches.get(sector)
-            
+
             if dest_pouch:
                 API.MoveItem(item.Serial, dest_pouch)
                 sorted_count += 1
-                # 750ms prevents "You must wait to perform another action" errors
+
+                # Detect map facet
+                facet_match = FACET_REGEX.search(props_text)
+                map_id = 0 if (facet_match and facet_match.group(1).lower() == "felucca") else API.GetMap()
+
+                # Place verified marker: (label, x, y, map_id)
+                API.AddMapMarker(f"SOS ({x},{y})", x, y, map_id)
+
+                # Delay to respect server drag/drop limits
                 time.sleep(0.75)
         else:
             API.SysMsg(f"Could not read coordinates on SOS {hex(item.Serial)}", 38)
 
-API.SysMsg(f"Done! Cleaned up {sorted_count} SOS bottles.", 68)
+API.SysMsg(f"Done! Sorted and mapped {sorted_count} SOS bottles.", 68)
