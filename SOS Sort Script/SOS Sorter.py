@@ -30,10 +30,11 @@ def get_sector_key(x, y):
 
     return f"{row}_{col}"
 
-# --- Step 1: Check Saved Persistent Pouches ---
+# --- Step 1: Check Saved Persistent Pouches (9 Trammel + 1 Felucca) ---
 pouches = {}
 needs_setup = False
 
+# Check 9 Trammel regional pouches
 for key in SECTOR_KEYS:
     val = API.GetPersistentVar(f"SOS_POUCH_{key}", "0", API.PersistentVar.Char)
     if not val or val == "0":
@@ -41,18 +42,25 @@ for key in SECTOR_KEYS:
         break
     pouches[key] = int(val)
 
+# Check 1 dedicated Felucca pouch
+fel_val = API.GetPersistentVar("SOS_POUCH_FEL", "0", API.PersistentVar.Char)
+if not fel_val or fel_val == "0":
+    needs_setup = True
+else:
+    pouches["FEL"] = int(fel_val)
+
 if needs_setup:
-    API.SysMsg("First-time setup: Target your 9 destination pouches in order...", 88)
+    API.SysMsg("First-time setup: Target your 9 Trammel pouches, then 1 Felucca pouch...", 88)
     sector_prompts = [
-        ("N_W",     "1/9: Top-Left (NW: Yew / Ice)"),
-        ("N_MID",   "2/9: Top-Center (North: Cove / Vesper)"),
-        ("N_E",     "3/9: Top-Right (NE: Nujel'm / Moonglow)"),
-        ("MID_W",   "4/9: Mid-Left (West: Skara Brae)"),
-        ("MID_MID", "5/9: Center (Central: Britain / Bucs)"),
-        ("MID_E",   "6/9: Mid-Right (East: Magincia / Ocllo)"),
-        ("S_W",     "7/9: Bottom-Left (SW: Destard / Jhelom)"),
-        ("S_MID",   "8/9: Bottom-Center (South: Trinsic / Haven)"),
-        ("S_E",     "9/9: Bottom-Right (SE: Serpents / Fire Isle)"),
+        ("N_W",     "1/10: Trammel Top-Left (NW: Yew / Ice)"),
+        ("N_MID",   "2/10: Trammel Top-Center (North: Cove / Vesper)"),
+        ("N_E",     "3/10: Trammel Top-Right (NE: Nujel'm / Moonglow)"),
+        ("MID_W",   "4/10: Trammel Mid-Left (West: Skara Brae)"),
+        ("MID_MID", "5/10: Trammel Center (Central: Britain / Bucs)"),
+        ("MID_E",   "6/10: Trammel Mid-Right (East: Magincia / Ocllo)"),
+        ("S_W",     "7/10: Trammel Bottom-Left (SW: Destard / Jhelom)"),
+        ("S_MID",   "8/10: Trammel Bottom-Center (South: Trinsic / Haven)"),
+        ("S_E",     "9/10: Trammel Bottom-Right (SE: Serpents / Fire Isle)"),
     ]
     for key, prompt in sector_prompts:
         API.SysMsg(prompt, 68)
@@ -63,9 +71,20 @@ if needs_setup:
         pouches[key] = int(p_serial)
         API.SavePersistentVar(f"SOS_POUCH_{key}", str(p_serial), API.PersistentVar.Char)
         time.sleep(0.15)
-    API.SysMsg("9 Pouches saved to profile!", 68)
+
+    # Prompt for the Felucca dump pouch
+    API.SysMsg("10/10: Target your dedicated FELUCCA pouch...", 88)
+    fel_serial = API.RequestTarget(timeout=15)
+    if not fel_serial or fel_serial == 0:
+        API.SysMsg("Felucca pouch targeting cancelled! Setup aborted.", 32)
+        API.Stop()
+    pouches["FEL"] = int(fel_serial)
+    API.SavePersistentVar("SOS_POUCH_FEL", str(fel_serial), API.PersistentVar.Char)
+    time.sleep(0.15)
+
+    API.SysMsg("All 10 Pouches saved to profile!", 68)
 else:
-    API.SysMsg("Loaded saved 9-pouch layout.", 68)
+    API.SysMsg("Loaded saved 10-pouch layout (9 Trammel + 1 Felucca).", 68)
 
 # --- Step 2: Target the Raw / Unsorted SOS Container ---
 API.SysMsg("Target the container with your unsorted SOS bottles...", 88)
@@ -96,20 +115,26 @@ for item in items:
             x = int(match.group(1))
             y = int(match.group(2))
 
-            # Move to corresponding regional pouch
-            sector = get_sector_key(x, y)
-            dest_pouch = pouches.get(sector)
+            # Detect facet: Felucca = 0, Trammel = 1
+            facet_match = FACET_REGEX.search(props_text)
+            is_felucca = bool(facet_match and facet_match.group(1).lower() == "felucca")
+            map_id = 0 if is_felucca else 1
+
+            # Route Felucca to dedicated bag, Trammel to 9-sector grid
+            if is_felucca:
+                dest_pouch = pouches.get("FEL")
+                label = f"FEL SOS ({x},{y})"
+            else:
+                sector = get_sector_key(x, y)
+                dest_pouch = pouches.get(sector)
+                label = f"SOS ({x},{y})"
 
             if dest_pouch:
                 API.MoveItem(item.Serial, dest_pouch)
                 sorted_count += 1
 
-                # Detect map facet
-                facet_match = FACET_REGEX.search(props_text)
-                map_id = 0 if (facet_match and facet_match.group(1).lower() == "felucca") else API.GetMap()
-
-                # Place verified marker: (label, x, y, map_id)
-                API.AddMapMarker(f"SOS ({x},{y})", x, y, map_id)
+                # Place map marker on the correct facet
+                API.AddMapMarker(label, x, y, map_id)
 
                 # Delay to respect server drag/drop limits
                 time.sleep(0.75)
