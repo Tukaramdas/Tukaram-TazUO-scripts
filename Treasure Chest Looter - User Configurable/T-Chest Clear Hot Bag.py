@@ -1,0 +1,1 @@
+API.RemovePersistentVar("CHEST_LOOT_BAG", API.PersistentVar.Char)
